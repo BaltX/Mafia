@@ -1,5 +1,8 @@
 namespace Mafia.Models;
 
+/// <summary>
+/// Роли игроков в игре.
+/// </summary>
 public enum GameRole
 {
     Unassigned,
@@ -14,6 +17,9 @@ public enum GameRole
     Necromancer
 }
 
+/// <summary>
+/// Стадии игрового раунда.
+/// </summary>
 public enum GameStage
 {
     Lobby,
@@ -32,6 +38,9 @@ public enum GameStage
     GameOver
 }
 
+/// <summary>
+/// Состояние игрока в лобби.
+/// </summary>
 public class PlayerState
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -43,14 +52,17 @@ public class PlayerState
     public bool? IsMafiaChecked { get; set; }
 }
 
+/// <summary>
+/// Состояние лобби (игровой комнаты).
+/// </summary>
 public class LobbyState
 {
     public string Code { get; init; } = string.Empty;
     public int Round { get; set; } = 0;
     public GameStage Stage { get; set; } = GameStage.Lobby;
-    public int DiscussionSeconds { get; set; } = 90;
+    public int DiscussionSeconds { get; set; } = 300;
     public int DayVoteSeconds { get; set; } = 60;
-    public int NightVoteSeconds { get; set; } = 300;
+    public int NightVoteSeconds { get; set; } = 30;
     public DateTimeOffset? StageEndsAtUtc { get; set; }
     public List<PlayerState> Players { get; init; } = [];
     
@@ -83,6 +95,9 @@ public class LobbyState
     public List<StageResultEntry> StageHistory { get; init; } = [];
 }
 
+/// <summary>
+/// Запись в истории стадий игры.
+/// </summary>
 public class StageResultEntry
 {
     public int Round { get; init; }
@@ -90,6 +105,9 @@ public class StageResultEntry
     public required List<string> ResultText { get; init; }
 }
 
+/// <summary>
+/// ViewModel для страницы игры.
+/// </summary>
 public class GamePageViewModel
 {
     public required LobbyState Lobby { get; init; }
@@ -104,6 +122,9 @@ public class GamePageViewModel
     public bool IsZombie => CurrentPlayer.IsZombie;
 }
 
+/// <summary>
+/// ViewModel для элемента списка лобби.
+/// </summary>
 public class LobbyListItemViewModel
 {
     public required string Code { get; init; }
@@ -111,46 +132,49 @@ public class LobbyListItemViewModel
     public int TotalPlayers { get; init; }
 }
 
+/// <summary>
+/// ViewModel для домашней страницы игры.
+/// </summary>
 public class GameHomeViewModel
 {
     public List<LobbyListItemViewModel> Lobbies { get; init; } = [];
 }
 
-public static class GameStageExtensions
-{
-    public static int GetSeconds(this GameStage stage, LobbyState lobby) => stage switch
-    {
-        GameStage.Discussion => lobby.DiscussionSeconds,
-        GameStage.DayVoting => lobby.DayVoteSeconds,
-        GameStage.DiscussionBeforeSecondVote => lobby.DiscussionSeconds,
-        GameStage.DayVoting2 => lobby.DayVoteSeconds,
-        GameStage.BeautyTurn => lobby.NightVoteSeconds,
-        GameStage.DoctorTurn => lobby.NightVoteSeconds,
-        GameStage.CommissionerTurn => lobby.NightVoteSeconds,
-        GameStage.MafiaTurn => lobby.NightVoteSeconds,
-        GameStage.KillerTurn => lobby.NightVoteSeconds,
-        GameStage.NecromancerTurn => lobby.NightVoteSeconds,
-        _ => 30
-    };
-}
 
+
+/// <summary>
+/// Расширения для PlayerState.
+/// </summary>
 public static class PlayerStateExtensions
 {
+    /// <summary>Проверяет, мёртв ли игрок.</summary>
     public static bool IsDead(this PlayerState p) => !p.IsAlive;
+    /// <summary>Проверяет, является ли игрок ведущим.</summary>
     public static bool IsHost(this PlayerState p) => p.Role == GameRole.Host;
+    /// <summary>Проверяет, является ли игрок маньяком.</summary>
     public static bool IsKiller(this PlayerState p) => p.Role == GameRole.Killer;
+    /// <summary>Проверяет, является ли игрок мафией (дон или мафиози).</summary>
     public static bool IsMafia(this PlayerState p) => p.Role == GameRole.Mafia || p.Role == GameRole.Don;
+    /// <summary>Проверяет, является ли игрок красоткой.</summary>
     public static bool IsBeauty(this PlayerState p) => p.Role == GameRole.Beauty;
+    /// <summary>Проверяет, является ли игрок доктором.</summary>
     public static bool IsDoctor(this PlayerState p) => p.Role == GameRole.Doctor;
+    /// <summary>Проверяет, является ли игрок комиссаром.</summary>
     public static bool IsCommissioner(this PlayerState p) => p.Role == GameRole.Commissioner;
+    /// <summary>Проверяет, является ли игрок некромантом.</summary>
     public static bool IsNecromancer(this PlayerState p) => p.Role == GameRole.Necromancer;
 }
 
+/// <summary>
+/// Расширения для LobbyState.
+/// </summary>
 public static class LobbyStateExtensions
 {
+    /// <summary>Получить игрока по ID.</summary>
     public static PlayerState? GetPlayer(this LobbyState lobby, Guid id) => 
         lobby.Players.FirstOrDefault(p => p.Id == id);
     
+    /// <summary>Получить живого игрока с указанной ролью.</summary>
     public static PlayerState? GetAlivePlayer(this LobbyState lobby, GameRole role) => 
         lobby.Players.FirstOrDefault(p => p.IsAlive && p.Role == role);
 }

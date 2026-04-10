@@ -2,13 +2,20 @@ using Mafia.Models;
 
 namespace Mafia.Services;
 
+/// <summary>
+/// Main service for managing Mafia game operations.
+/// Coordinates between specialized services for game logic, voting, and night stages.
+/// </summary>
 public class MafiaGameService
 {
     private readonly object _sync = new();
     private readonly Dictionary<string, LobbyState> _lobbies = new(StringComparer.OrdinalIgnoreCase);
-    private readonly MafiaRoundService _roundService = new();
+    private readonly MafiaGameLogicService _gameLogicService = new();
+    private readonly MafiaVotingService _votingService = new();
+    private readonly MafiaNightService _nightService = new();
     private static readonly Random SharedRandom = Random.Shared;
 
+    /// <summary>Creates a new game lobby with the host player.</summary>
     public (LobbyState Lobby, PlayerState Host)? CreateLobby(string hostName)
     {
         if (string.IsNullOrWhiteSpace(hostName))
@@ -42,6 +49,7 @@ public class MafiaGameService
         }
     }
 
+    /// <summary>Returns list of available lobbies.</summary>
     public List<LobbyListItemViewModel> GetLobbies()
     {
         lock (_sync)
@@ -58,6 +66,7 @@ public class MafiaGameService
         }
     }
 
+    /// <summary>Joins an existing lobby.</summary>
     public (LobbyState Lobby, PlayerState Player)? JoinLobby(string code, string name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -89,6 +98,7 @@ public class MafiaGameService
         }
     }
 
+    /// <summary>Adds a bot player to the lobby.</summary>
     public (LobbyState Lobby, PlayerState Player)? AddBot(string code, Guid hostId, out string? error)
     {
         lock (_sync)
@@ -118,6 +128,7 @@ public class MafiaGameService
         }
     }
 
+    /// <summary>Gets the current state of a lobby for a specific player.</summary>
     public (LobbyState Lobby, PlayerState Player)? GetState(string code, Guid playerId)
     {
         lock (_sync)
@@ -132,8 +143,8 @@ public class MafiaGameService
             var now = DateTimeOffset.UtcNow;
             while (lobby.StageEndsAtUtc.HasValue && now >= lobby.StageEndsAtUtc.Value && lobby.Stage != GameStage.Lobby && lobby.Stage != GameStage.GameOver)
             {
-                _roundService.ProcessBotVotes(lobby, lobby.Stage);
-                _roundService.NextStage(lobby, out _);
+                _votingService.ProcessBotVotes(lobby, lobby.Stage);
+                _nightService.NextStage(lobby, out _);
             }
 
             var player = lobby.Players.FirstOrDefault(p => p.Id == playerId);
@@ -141,6 +152,7 @@ public class MafiaGameService
         }
     }
 
+    /// <summary>Starts the game and assigns roles.</summary>
     public bool StartGame(string code, Guid hostId, out string? error)
     {
         lock (_sync)
@@ -151,10 +163,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.StartGame(lobby!, out error);
+            return _gameLogicService.StartGame(lobby!, out error);
         }
     }
 
+    /// <summary>Cast a day vote.</summary>
     public bool DayVote(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -165,10 +178,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.DayVote(lobby!, player!, targetId, out error);
+            return _votingService.DayVote(lobby!, player!, targetId, out error);
         }
     }
 
+    /// <summary>Cancel day vote.</summary>
     public bool CancelDayVote(string code, Guid playerId, out string? error)
     {
         lock (_sync)
@@ -179,10 +193,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CancelDayVote(lobby!, player!, out error);
+            return _votingService.CancelDayVote(lobby!, player!, out error);
         }
     }
 
+    /// <summary>Cast mafia vote.</summary>
     public bool MafiaVote(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -193,10 +208,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.MafiaVote(lobby!, player!, targetId, out error);
+            return _votingService.MafiaVote(lobby!, player!, targetId, out error);
         }
     }
 
+    /// <summary>Cancel mafia vote.</summary>
     public bool CancelMafiaVote(string code, Guid playerId, out string? error)
     {
         lock (_sync)
@@ -207,10 +223,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CancelMafiaVote(lobby!, player!, out error);
+            return _votingService.CancelMafiaVote(lobby!, player!, out error);
         }
     }
 
+    /// <summary>Cast maniac (killer) vote.</summary>
     public bool ManiacVote(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -221,10 +238,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.ManiacVote(lobby!, player!, targetId, out error);
+            return _votingService.ManiacVote(lobby!, player!, targetId, out error);
         }
     }
 
+    /// <summary>Cancel maniac vote.</summary>
     public bool CancelManiacVote(string code, Guid playerId, out string? error)
     {
         lock (_sync)
@@ -235,24 +253,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CancelManiacVote(lobby!, player!, out error);
+            return _votingService.CancelManiacVote(lobby!, player!, out error);
         }
     }
 
-    public bool CommissionerAction(string code, Guid playerId, Guid targetId, bool isKill, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _roundService.CommissionerAction(lobby!, player!, targetId, isKill, out error);
-        }
-    }
-
+    /// <summary>Commissioner check action.</summary>
     public bool CommissionerCheck(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -263,10 +268,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CommissionerAction(lobby!, player!, targetId, false, out error);
+            return _votingService.CommissionerAction(lobby!, player!, targetId, false, out error);
         }
     }
 
+    /// <summary>Commissioner kill action.</summary>
     public bool CommissionerKill(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -277,10 +283,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CommissionerAction(lobby!, player!, targetId, true, out error);
+            return _votingService.CommissionerAction(lobby!, player!, targetId, true, out error);
         }
     }
 
+    /// <summary>Set commissioner mode (check or kill).</summary>
     public bool SetCommissionerIsKill(string code, Guid playerId, bool isKill, out string? error)
     {
         lock (_sync)
@@ -291,10 +298,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.SetCommissionerIsKill(lobby!, player!, isKill, out error);
+            return _votingService.SetCommissionerIsKill(lobby!, player!, isKill, out error);
         }
     }
 
+    /// <summary>Commissioner vote.</summary>
     public bool CommissionerVote(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -305,10 +313,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CommissionerVote(lobby!, player!, targetId, out error);
+            return _votingService.CommissionerVote(lobby!, player!, targetId, out error);
         }
     }
 
+    /// <summary>Cancel commissioner vote.</summary>
     public bool CancelCommissionerVote(string code, Guid playerId, out string? error)
     {
         lock (_sync)
@@ -319,10 +328,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CancelCommissionerVote(lobby!, player!, out error);
+            return _votingService.CancelCommissionerVote(lobby!, player!, out error);
         }
     }
 
+    /// <summary>Beauty action.</summary>
     public bool BeautyAction(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -333,10 +343,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.BeautyAction(lobby!, player!, targetId, out error);
+            return _votingService.BeautyAction(lobby!, player!, targetId, out error);
         }
     }
 
+    /// <summary>Cancel beauty vote.</summary>
     public bool CancelBeautyVote(string code, Guid playerId, out string? error)
     {
         lock (_sync)
@@ -347,10 +358,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CancelBeautyVote(lobby!, player!, out error);
+            return _votingService.CancelBeautyVote(lobby!, player!, out error);
         }
     }
 
+    /// <summary>Doctor action.</summary>
     public bool DoctorAction(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -361,10 +373,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.DoctorAction(lobby!, player!, targetId, out error);
+            return _votingService.DoctorAction(lobby!, player!, targetId, out error);
         }
     }
 
+    /// <summary>Cancel doctor vote.</summary>
     public bool CancelDoctorVote(string code, Guid playerId, out string? error)
     {
         lock (_sync)
@@ -375,10 +388,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CancelDoctorVote(lobby!, player!, out error);
+            return _votingService.CancelDoctorVote(lobby!, player!, out error);
         }
     }
 
+    /// <summary>Necromancer action.</summary>
     public bool NecromancerAction(string code, Guid playerId, Guid targetId, out string? error)
     {
         lock (_sync)
@@ -389,10 +403,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.NecromancerAction(lobby!, player!, targetId, out error);
+            return _votingService.NecromancerAction(lobby!, player!, targetId, out error);
         }
     }
 
+    /// <summary>Cancel necromancer vote.</summary>
     public bool CancelNecromancerVote(string code, Guid playerId, out string? error)
     {
         lock (_sync)
@@ -403,10 +418,11 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.CancelNecromancerVote(lobby!, player!, out error);
+            return _votingService.CancelNecromancerVote(lobby!, player!, out error);
         }
     }
 
+    /// <summary>Advance to the next game stage.</summary>
     public bool NextStage(string code, Guid hostId, out string? error)
     {
         lock (_sync)
@@ -417,7 +433,7 @@ public class MafiaGameService
                 return false;
             }
 
-            return _roundService.NextStage(lobby!, out error);
+            return _nightService.NextStage(lobby!, out error);
         }
     }
 

@@ -1,7 +1,6 @@
 using Mafia.Services;
 using Microsoft.AspNetCore.Mvc;
 using Mafia.Models;
-using Mafia.Models;
 
 namespace Mafia.Controllers;
 
@@ -341,17 +340,6 @@ public class GameController(MafiaGameService gameService) : Controller
     public IActionResult CancelManiacVote(string code, Guid playerId)
     {
         if (!gameService.CancelManiacVote(code, playerId, out var error))
-        {
-            return BadRequest(new { error });
-        }
-
-        return Ok();
-    }
-
-    [HttpPost]
-    public IActionResult CommissionerAction(string code, Guid playerId, Guid targetId, bool isKill)
-    {
-        if (!gameService.CommissionerAction(code, playerId, targetId, isKill, out var error))
         {
             return BadRequest(new { error });
         }
