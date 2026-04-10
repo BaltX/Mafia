@@ -106,7 +106,7 @@ public class MafiaNightService
 
         if (lobby.Stage == GameStage.MafiaTurn)
         {
-            lobby.MafiaVictimId = MafiaVotingService.ResolveMafiaVote(lobby, lobby.MafiaVotes);
+            lobby.MafiaVictimId = GameResultService.ResolveMafiaVote(lobby);
         }
 
         if (lobby.Stage == GameStage.DayVoting)
@@ -138,29 +138,16 @@ public class MafiaNightService
         
         lobby.StageEndsAtUtc = DateTimeOffset.UtcNow.AddSeconds(lobby.Stage.GetSeconds(lobby));
         lobby.Stage = nextStage.Value;
-        MafiaVotingService.ProcessBotVotes(lobby, nextStage.Value);
+        BotActionService.ProcessBotVotes(lobby, nextStage.Value);
     }
 
     private static void HandleDayResult(LobbyState lobby)
     {
-        lobby.LastDayVictimId = MafiaVotingService.ResolveVote(lobby, lobby.DayVotes);
+        lobby.LastDayVictimId = GameResultService.ResolveDayVote(lobby);
         
         if (lobby.Stage == GameStage.DayVoting)
         {
-            var topVoted = lobby.DayVotes.Values
-                .GroupBy(x => x)
-                .Select(g => new { Id = g.Key, Count = g.Count() })
-                .OrderByDescending(x => x.Count)
-                .ToList();
-            
-            if (topVoted.Count > 0 && topVoted[0].Count > 0)
-            {
-                var maxVotes = topVoted[0].Count;
-                lobby.Day1TopVotedPlayerIds = topVoted
-                    .Where(x => x.Count == maxVotes)
-                    .Select(x => x.Id)
-                    .ToList();
-            }
+            lobby.Day1TopVotedPlayerIds = GameResultService.GetDay1TopVotedIds(lobby, 1);
         }
         
         if (lobby.LastDayVictimId.HasValue)
@@ -198,7 +185,7 @@ public class MafiaNightService
 
     private void EndNight(LobbyState lobby)
     {
-        ApplyNightActions(lobby);
+        NightActionService.ApplyNightActions(lobby);
         if (MafiaWinConditionService.TrySetWinner(lobby))
         {
             return;
@@ -207,35 +194,8 @@ public class MafiaNightService
         lobby.Stage = GameStage.NightResult;
     }
 
-    private static void ZombiePlayer(LobbyState lobby, Guid id)
-    {
-        var player = lobby.Players.FirstOrDefault(p => p.Id == id);
-        if (player is not null && player is { IsAlive: false, IsZombie: false })
-        {
-            player.IsAlive = true;
-            player.IsZombie = true;
-            lobby.LastKilledPlayers.Remove(player.Id);
-            lobby.LastResurrectedPlayers.Add(player.Id);
-        }
-    }
-
-    private static void KillPlayer(LobbyState lobby, Guid id)
-    {
-        var player = lobby.Players.FirstOrDefault(p => p.Id == id);
-        if (player is not null && player.IsAlive)
-        {
-            player.IsAlive = false;
-            lobby.LastKilledPlayers.Add(player.Id);
-            if (player.Role == GameRole.Necromancer)
-            {
-                foreach (var zombie in lobby.Players.Where(x=>x.IsAlive && x.IsZombie))
-                {
-                    zombie.IsAlive = false;
-                    lobby.LastKilledPlayers.Add(zombie.Id);
-                }
-            }
-        }
-    }
+    private static void KillPlayer(LobbyState lobby, Guid id) =>
+        NightActionService.KillPlayer(lobby, id);
 
     private static void ApplyNightActions(LobbyState lobby)
     {
@@ -354,7 +314,7 @@ public class MafiaNightService
             var zombieCandidate = lobby.LastKilledPlayers.FirstOrDefault(p => p == necromancerTargetId.Value);
             if (zombieCandidate is not null)
             {
-                ZombiePlayer(lobby, zombieCandidate.Value);
+                NightActionService.ZombiePlayer(lobby, zombieCandidate.Value);
             }
         }
 
