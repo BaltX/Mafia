@@ -1,0 +1,80 @@
+@model Mafia.Models.GameHomeViewModel
+@{
+    ViewData["Title"] = "Мафия";
+}
+
+<div class="hero-section mb-5">
+    <h1 class="display-4 fw-bold">🎭 Мафия</h1>
+    <p class="lead text-muted">Классическая игра с ролями и голосованием</p>
+</div>
+
+<div class="row g-4 justify-content-center">
+    <div class="col-md-5 col-lg-4">
+        <div class="card">
+            <div class="card-header text-center">
+                <h5 class="mb-0">🎮 Создать лобби</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Ведущий создаёт комнату и запускает игру</p>
+                <form asp-controller="Game" asp-action="CreateLobby" method="post">
+                    <div class="mb-3">
+                        <label for="hostName" class="form-label">Ваше имя</label>
+                        <input id="hostName" name="playerName" class="form-control" required maxlength="30" placeholder="Введите имя"/>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">✨ Создать лобби</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7 col-lg-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h5 class="mb-0">🏠 Существующие лобби</h5>
+            </div>
+            <div class="card-body">
+                @if (Model.Lobbies.Count == 0)
+                {
+                    <p class="text-muted text-center mb-0">Пока нет активных лобби</p>
+                }
+                else
+                {
+                    <div class="d-flex flex-column gap-3">
+                        @foreach (var lobby in Model.Lobbies)
+                        {
+                            <form asp-controller="Game" asp-action="JoinLobby" method="post" class="join-form">
+                                <input type="hidden" name="code" value="@lobby.Code"/>
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <div>
+                                        <strong class="text-accent">🎲 Код: @lobby.Code</strong>
+                                        <div class="text-muted small">👥 Игроков: @lobby.TotalPlayers | @lobby.StageText</div>
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <input name="playerName" class="form-control" placeholder="Ваше имя" required maxlength="30"/>
+                                    <button type="submit" class="btn btn-success">🚀 Войти</button>
+                                </div>
+                            </form>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (ViewBag.Error is string error && !string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger mt-4">⚠️ @error</div>
+}
+
+<div id="returnToLobbyBlock" class="alert alert-info mt-4 d-none">
+    <div class="d-flex justify-content-between align-items-center">
+        <span>💾 В этой вкладке есть активная сессия игрока.</span>
+        <a id="returnToLobbyLink" class="btn btn-sm btn-outline-primary">Вернуться в лобби</a>
+    </div>
+</div>
+
+@section Scripts
+{
+    <script src="~/js/site.js" asp-append-version="true"></script>
+}

@@ -1,0 +1,989 @@
+@using Mafia.Models
+@model GamePageViewModel
+@{
+    var canSeeVotes = Model.IsHost;
+    var yourDayVote = Model.Lobby.DayVotes.TryGetValue(Model.CurrentPlayer.Id, out var dayVoteTargetId) ? dayVoteTargetId : (Guid?)null;
+    var yourMafiaVote = Model.Lobby.MafiaVotes.TryGetValue(Model.CurrentPlayer.Id, out var mafiaVoteTargetId) ? mafiaVoteTargetId : (Guid?)null;
+    var yourManiacVote = Model.Lobby.KillerVote;
+    var yourBeautyVote = Model.Lobby.BeautyVote;
+    var yourDoctorVote = Model.Lobby.DoctorVote;
+    var yourNecromancerVote = Model.Lobby.NecromancerVote;
+    string StageName(GameStage stage) => stage switch
+    {
+        GameStage.Lobby => "Ожидание игроков",
+        GameStage.Discussion => "Обсуждение",
+        GameStage.DayVoting => "Дневное голосование",
+        GameStage.DiscussionBeforeSecondVote => "Обсуждение перед вторым голосованием",
+        GameStage.DayVoting2 => "Второе дневное голосование",
+        GameStage.NightStart => "Начало ночи",
+        GameStage.BeautyTurn => "Ход красотки",
+        GameStage.DoctorTurn => "Ход доктора",
+        GameStage.CommissionerTurn => "Ход комиссара",
+        GameStage.MafiaTurn => "Ход мафии",
+        GameStage.KillerTurn => "Ход убийцы",
+        GameStage.NecromancerTurn => "Ход некроманта",
+        GameStage.NightResult => "Результат ночи",
+        GameStage.GameOver => "Игра завершена",
+        _ => stage.ToString()
+    };
+    string RoleName(GameRole role) => role switch
+    {
+        GameRole.Unassigned => "Будет назначена при старте",
+        GameRole.Host => "Ведущий",
+        GameRole.Civilian => "Мирный житель",
+        GameRole.Mafia => "Мафия",
+        GameRole.Don => "Дон мафии",
+        GameRole.Commissioner => "Комиссар",
+        GameRole.Killer => "Убийца",
+        GameRole.Beauty => "Красотка",
+        GameRole.Doctor => "Доктор",
+        GameRole.Necromancer => "Некромант",
+        _ => role.ToString()
+    };
+    string RoleBadgeClass(GameRole role) => role switch
+    {
+        GameRole.Host or GameRole.Unassigned => "bg-secondary",
+        GameRole.Mafia or GameRole.Don => "bg-danger",
+        GameRole.Killer or GameRole.Necromancer => "bg-purple",
+        _ => "bg-primary"
+    };
+    string RoleFaction(GameRole role) => role switch
+    {
+        GameRole.Host or GameRole.Unassigned => "other",
+        GameRole.Mafia or GameRole.Don => "mafia",
+        GameRole.Killer or GameRole.Necromancer => "maniac",
+        _ => "civilian"
+    };
+}
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1 class="h3 mb-1">Лобби: <code>@Model.Lobby.Code</code></h1>
+        <div>Раунд: <strong>@Model.Lobby.Round</strong> | Стадия: <strong>@StageName(Model.Lobby.Stage)</strong></div>
+    </div>
+    <a asp-controller="Game" asp-action="Index" class="btn btn-outline-secondary">В меню</a>
+</div>
+
+@if (Model.Lobby.StageEndsAtUtc is DateTimeOffset endsAt &&
+     (Model.Lobby.Stage == GameStage.Discussion || Model.Lobby.Stage == GameStage.DayVoting || Model.Lobby.Stage == GameStage.DayVoting2 || Model.Lobby.Stage == GameStage.DiscussionBeforeSecondVote || Model.Lobby.Stage == GameStage.MafiaTurn || Model.Lobby.Stage == GameStage.KillerTurn || Model.Lobby.Stage == GameStage.BeautyTurn || Model.Lobby.Stage == GameStage.DoctorTurn || Model.Lobby.Stage == GameStage.NecromancerTurn))
+{
+    var timerTitle = Model.Lobby.Stage switch
+    {
+        GameStage.Discussion => "До конца обсуждения",
+        GameStage.DiscussionBeforeSecondVote => "До конца обсуждения",
+        GameStage.DayVoting or GameStage.DayVoting2 => "До конца голосования",
+        _ => "До конца голосования"
+    };
+    <div id="lobby-timer-data" data-ends-at="@endsAt.ToUnixTimeMilliseconds()" data-title="@timerTitle"></div>
+}
+
+@if (ViewBag.Error is string error && !string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@if (Model.Lobby.Stage == GameStage.GameOver)
+{
+    <div class="alert alert-success"><h2 class="h5 mb-0">@Model.Lobby.WinnerText</h2></div>
+}
+
+@if (Model.IsHost)
+{
+    <div class="card mb-4">
+        <div class="card-header">Панель ведущего</div>
+        <div class="card-body d-flex gap-2 flex-wrap">
+            @if (Model.Lobby.Stage == GameStage.Lobby)
+            {
+                <form asp-action="StartGame" method="post" onsubmit="return handleForm(event)">
+                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                    <button type="submit" class="btn btn-primary">Начать игру</button>
+                </form>
+                <form asp-action="AddBot" method="post" onsubmit="return handleForm(event)">
+                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                    <button type="submit" class="btn btn-outline-primary">Добавить бота</button>
+                </form>
+            }
+            
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-6">
+            <div class="card mb-4">
+                <div class="card-header">Игроки</div>
+                <div class="card-body">
+                    @foreach (var player in Model.Lobby.Players)
+                    {
+                        <div class="mb-1">
+                            @player.Name 
+                            <span class="badge @RoleBadgeClass(player.Role)">@RoleName(player.Role)</span>
+                            @if (player.IsBot) { <span>🤖</span> }
+                            @if (!player.IsAlive) { <span>💀</span> }
+                            @if (player.IsZombie) { <span>🧟</span> }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (canSeeVotes && (Model.Lobby.Stage == GameStage.DayVoting || Model.Lobby.Stage == GameStage.DayVoting2 || Model.Lobby.Stage == GameStage.MafiaTurn || Model.Lobby.Stage == GameStage.KillerTurn || Model.Lobby.Stage == GameStage.BeautyTurn || Model.Lobby.Stage == GameStage.DoctorTurn || Model.Lobby.Stage == GameStage.NecromancerTurn || Model.Lobby.Stage == GameStage.CommissionerTurn))
+            {
+                var stageName = Model.Lobby.Stage switch
+                {
+                    GameStage.DayVoting => "Дневное голосование",
+                    GameStage.DayVoting2 => "Второе дневное голосование",
+                    GameStage.MafiaTurn => "Голос мафии",
+                    GameStage.KillerTurn => "Голос маньяка",
+                    GameStage.BeautyTurn => "Выбор красотки",
+                    GameStage.DoctorTurn => "Выбор доктора",
+                    GameStage.NecromancerTurn => "Выбор некроманта",
+                    GameStage.CommissionerTurn => "Действие комиссара",
+                    _ => "Голоса"
+                };
+                var votes = Model.Lobby.Stage switch
+                {
+                    GameStage.DayVoting => Model.Lobby.DayVotes,
+                    GameStage.DayVoting2 => Model.Lobby.DayVotes,
+                    GameStage.MafiaTurn => Model.Lobby.MafiaVotes,
+                    _ => new Dictionary<Guid, Guid>()
+                };
+                var singleVote = Model.Lobby.Stage switch
+                {
+                    GameStage.BeautyTurn => Model.Lobby.BeautyVote,
+                    GameStage.DoctorTurn => Model.Lobby.DoctorVote,
+                    GameStage.NecromancerTurn => Model.Lobby.NecromancerVote,
+                    GameStage.CommissionerTurn => Model.Lobby.CommissionerVote,
+                    GameStage.KillerTurn => Model.Lobby.KillerVote,
+                    _ => (Guid?)null
+                };
+                <div class="card mb-4">
+                    <div class="card-header">@stageName</div>
+                    <div class="card-body">
+                        @if (Model.Lobby.Stage == GameStage.BeautyTurn || 
+                             Model.Lobby.Stage == GameStage.DoctorTurn || 
+                             Model.Lobby.Stage == GameStage.CommissionerTurn ||
+                             Model.Lobby.Stage == GameStage.KillerTurn ||
+                             Model.Lobby.Stage == GameStage.NecromancerTurn)
+                        {
+                            if (singleVote.HasValue)
+                            {
+                                var target = Model.Lobby.Players.FirstOrDefault(p => p.Id == singleVote.Value);
+                                <div class="text-muted">Выбор: @target?.Name</div>
+                            }
+                            else
+                            {
+                                <div class="text-muted">Пока нет выбора.</div>
+                            }
+                        }
+                        else if (votes.Count == 0)
+                        {
+                            <div class="text-muted">Пока нет голосов.</div>
+                        }
+                        else
+                        {
+                            <ul class="list-group mb-2">
+                                @foreach (var v in votes)
+                                {
+                                    var voter = Model.Lobby.Players.FirstOrDefault(p => p.Id == v.Key);
+                                    var target = Model.Lobby.Players.FirstOrDefault(p => p.Id == v.Value);
+                                    if (voter is not null && target is not null)
+                                    {
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span>@voter.Name → @target.Name</span>
+                                        </li>
+                                    }
+                                }
+                            </ul>
+                            var voteCounts = votes.Values
+                                .GroupBy(v => v)
+                                .Select(g => new { PlayerId = g.Key, Count = g.Count() })
+                                .OrderByDescending(x => x.Count)
+                                .ToList();
+                            <div class="text-muted small">
+                                Итог: 
+                                @string.Join(", ", voteCounts.Select(vc => {
+                                    var p = Model.Lobby.Players.FirstOrDefault(pl => pl.Id == vc.PlayerId);
+                                    return p is not null ? $"{p.Name} - {vc.Count}" : "";
+                                }))
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="col-lg-6">
+            @if ((Model.Lobby.Stage == GameStage.DayVoting || Model.Lobby.Stage == GameStage.DayVoting2) && Model.CurrentPlayer.IsAlive && !Model.IsHost)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">@(Model.Lobby.Stage == GameStage.DayVoting2 ? "Второе дневное голосование" : "Голосование")</div>
+                    <div class="card-body">
+                        @if (Model.Lobby.Stage == GameStage.DayVoting2 && Model.Lobby.Day1TopVotedPlayerIds.Count > 0)
+                        {
+                            <p class="text-info mb-2">Можно голосовать только за лидеров первого дня!</p>
+                        }
+                        @if (yourDayVote.HasValue)
+                        {
+                            var votedTarget = Model.Lobby.Players.FirstOrDefault(p => p.Id == yourDayVote);
+                            <div class="mb-2">Вы проголосовали за: <strong>@votedTarget?.Name</strong></div>
+                            <div class="d-flex gap-2 flex-wrap mb-2">
+                                <form asp-action="CancelDayVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <button type="submit" class="btn btn-outline-danger btn-sm">Отменить</button>
+                                </form>
+                                @{
+                                    var votingTargets = Model.Lobby.Stage == GameStage.DayVoting2 && Model.Lobby.Day1TopVotedPlayerIds.Count > 0
+                                        ? Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id && Model.Lobby.Day1TopVotedPlayerIds.Contains(p.Id))
+                                        : Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id);
+                                }
+                                @foreach (var target in votingTargets)
+                                {
+                                    <form asp-action="DayVote" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-outline-secondary btn-sm">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            var votingTargets = Model.Lobby.Stage == GameStage.DayVoting2 && Model.Lobby.Day1TopVotedPlayerIds.Count > 0
+                                ? Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id && Model.Lobby.Day1TopVotedPlayerIds.Contains(p.Id))
+                                : Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id);
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in votingTargets)
+                                {
+                                    <form asp-action="DayVote" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (Model.Lobby.Stage == GameStage.MafiaTurn && Model.CurrentPlayer.IsAlive && (Model.CurrentPlayer.Role == GameRole.Mafia || Model.CurrentPlayer.Role == GameRole.Don))
+            {
+                <div class="card mb-4">
+                    <div class="card-header">Ход мафии</div>
+                    <div class="card-body">
+                        @if (yourMafiaVote.HasValue)
+                        {
+                            <div class="mb-2">Вы проголосовали за: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourMafiaVote)?.Name</strong></div>
+                            <div class="d-flex gap-2 flex-wrap mb-2">
+                                <form asp-action="CancelMafiaVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <button type="submit" class="btn btn-outline-dark">Отменить</button>
+                                </form>
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Mafia && p.Role != GameRole.Don))
+                                {
+                                    <form asp-action="MafiaVote" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-dark">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Mafia && p.Role != GameRole.Don))
+                                {
+                                    <form asp-action="MafiaVote" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-dark">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (Model.Lobby.Stage == GameStage.KillerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Killer)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">Ход маньяка</div>
+                    <div class="card-body">
+                        @if (yourManiacVote.HasValue)
+                        {
+                            <div class="mb-2">Вы проголосовали за: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourManiacVote)?.Name</strong></div>
+                            <div class="d-flex gap-2 flex-wrap mb-2">
+                                <form asp-action="CancelManiacVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <button type="submit" class="btn btn-outline-secondary">Отменить</button>
+                                </form>
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Killer))
+                                {
+                                    <form asp-action="ManiacVote" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Killer))
+                                {
+                                    <form asp-action="ManiacVote" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (Model.Lobby.Stage == GameStage.CommissionerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Commissioner)
+            {
+                var hasAction = Model.Lobby.CommissionerVote.HasValue || Model.Lobby.PendingCommissionerCheckResult.HasValue;
+                <div class="card mb-4">
+                    <div class="card-header">Ход комиссара</div>
+                    <div class="card-body">
+                        @if (hasAction)
+                        {
+                            <div class="mb-2">Действие выбрано</div>
+                            <div class="d-flex gap-2 flex-wrap mb-2">
+                                <form asp-action="CancelCommissionerVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <button type="submit" class="btn btn-outline-danger">Отменить</button>
+                                </form>
+                            </div>
+                            <p class="mb-2">Убить игрока:</p>
+                            <div class="d-flex gap-2 flex-wrap mb-3">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="CommissionerKill" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-danger">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                            <p class="mb-2">Проверить игрока:</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="CommissionerCheck" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-info">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="mb-2">Убить игрока:</p>
+                            <div class="d-flex gap-2 flex-wrap mb-3">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="CommissionerKill" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-danger">Убить @target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                            <p class="mb-2">Проверить игрока:</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="CommissionerCheck" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-info">Проверить @target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (Model.Lobby.Stage == GameStage.BeautyTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Beauty)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">Ход красотки</div>
+                    <div class="card-body">
+                        @if (yourBeautyVote.HasValue)
+                        {
+                            <div class="mb-2">Выбрано: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourBeautyVote)?.Name</strong></div>
+                            <div class="d-flex gap-2 flex-wrap mb-2">
+                                <form asp-action="CancelBeautyVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <button type="submit" class="btn btn-outline-warning">Отменить</button>
+                                </form>
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="BeautyAction" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-warning">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="mb-2">Выберите игрока (нельзя выбирать одного игрока 2 ночи подряд):</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="BeautyAction" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-warning">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (Model.Lobby.Stage == GameStage.DoctorTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Doctor)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">Ход доктора</div>
+                    <div class="card-body">
+                        @if (yourDoctorVote.HasValue)
+                        {
+                            <div class="mb-2">Выбрано: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourDoctorVote)?.Name</strong></div>
+                            <div class="d-flex gap-2 flex-wrap mb-2">
+                                <form asp-action="CancelDoctorVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <button type="submit" class="btn btn-outline-success">Отменить</button>
+                                </form>
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="DoctorAction" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-success">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="mb-2">Выберите игрока для спасения (нельзя выбирать одного игрока 2 ночи подряд):</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="DoctorAction" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-success">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (Model.Lobby.Stage == GameStage.NecromancerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Necromancer)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">Ход некроманта</div>
+                    <div class="card-body">
+                        @if (yourNecromancerVote.HasValue)
+                        {
+                            <div class="mb-2">Выбрано: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourNecromancerVote)?.Name</strong></div>
+                            <div class="d-flex gap-2 flex-wrap mb-2">
+                                <form asp-action="CancelNecromancerVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <button type="submit" class="btn btn-outline-secondary">Отменить</button>
+                                </form>
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="NecromancerAction" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="mb-2">Выберите игрока, чтобы превратить его в зомби:</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                                {
+                                    <form asp-action="NecromancerAction" method="post" onsubmit="return handleForm(event)">
+                                        <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                        <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                        <input type="hidden" name="targetId" value="@target.Id"/>
+                                        <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+            <div class="card mb-4">
+                <div class="card-header">История стадий</div>
+                <div class="card-body">
+                    @if (Model.Lobby.StageHistory.Count == 0)
+                    {
+                        <div class="text-muted">Пока нет завершённых стадий.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group">
+                            @foreach (var entry in Model.Lobby.StageHistory.OrderByDescending(x => x.Round))
+                            {
+                                <li class="list-group-item">
+                                    <strong>Раунд @entry.Round, @entry.StageText:</strong>
+                                    <ul class="mb-0 mt-2">
+                                        @foreach (var text in @entry.ResultText)
+                                        {
+                                            <li>@text</li>
+                                        }
+                                    </ul>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    
+}
+else
+{
+    <div class="col-lg-6 mx-auto">
+        <div class="card mb-4">
+            <div class="card-header">Игроки</div>
+            <div class="card-body">
+                @foreach (var player in Model.Lobby.Players)
+                {
+                    var displayAsAlive = player.IsAlive || (player.IsZombie && !Model.IsNecromancer);
+                    var showZombieBadge = player.IsZombie && (Model.IsNecromancer || Model.IsHost);
+                    var faction = RoleFaction(player.Role);
+                    <div class="mb-1">
+                        @player.Name
+                        @if (player.Id == Model.CurrentPlayer.Id)
+                        {
+                            <span class="badge @RoleBadgeClass(player.Role)">@RoleName(player.Role)</span>
+                        }
+                        @if (player.IsBot) { <span>🤖</span> }
+                        @if (!displayAsAlive) { <span>💀</span> }
+                        @if (showZombieBadge) { <span>🧟</span> }
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if ((Model.Lobby.Stage == GameStage.DayVoting || Model.Lobby.Stage == GameStage.DayVoting2) && Model.CurrentPlayer.IsAlive)
+        {
+            <div class="card mb-4">
+                <div class="card-header">@(Model.Lobby.Stage == GameStage.DayVoting2 ? "Второе дневное голосование" : "Дневное голосование")</div>
+                <div class="card-body">
+                    @if (Model.Lobby.Stage == GameStage.DayVoting2 && Model.Lobby.Day1TopVotedPlayerIds.Count > 0)
+                    {
+                        <p class="text-info mb-2">Можно голосовать только за лидеров первого дня!</p>
+                    }
+                    @if (yourDayVote.HasValue)
+                    {
+                        var votedTarget = Model.Lobby.Players.FirstOrDefault(p => p.Id == yourDayVote);
+                        <div class="mb-2">Вы проголосовали за: <strong>@votedTarget?.Name</strong></div>
+                        <div class="d-flex gap-2 flex-wrap mb-2">
+                            <form asp-action="CancelDayVote" method="post" onsubmit="return handleForm(event)">
+                                <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                <button type="submit" class="btn btn-outline-danger">Отменить</button>
+                            </form>
+                            @{
+                                var votingTargets = Model.Lobby.Stage == GameStage.DayVoting2 && Model.Lobby.Day1TopVotedPlayerIds.Count > 0
+                                    ? Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id && Model.Lobby.Day1TopVotedPlayerIds.Contains(p.Id))
+                                    : Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id);
+                            }
+                            @foreach (var target in votingTargets)
+                            {
+                                <form asp-action="DayVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-danger">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        var votingTargets = Model.Lobby.Stage == GameStage.DayVoting2 && Model.Lobby.Day1TopVotedPlayerIds.Count > 0
+                            ? Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id && Model.Lobby.Day1TopVotedPlayerIds.Contains(p.Id))
+                            : Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id);
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in votingTargets)
+                            {
+                                <form asp-action="DayVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-danger">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (Model.Lobby.Stage == GameStage.MafiaTurn && Model.CurrentPlayer.IsAlive && (Model.CurrentPlayer.Role == GameRole.Mafia || Model.CurrentPlayer.Role == GameRole.Don))
+        {
+            <div class="card mb-4">
+                <div class="card-header">Ход мафии</div>
+                <div class="card-body">
+                    @if (yourMafiaVote.HasValue)
+                    {
+                        <div class="mb-2">Вы проголосовали за: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourMafiaVote)?.Name</strong></div>
+                        <div class="d-flex gap-2 flex-wrap mb-2">
+                            <form asp-action="CancelMafiaVote" method="post" onsubmit="return handleForm(event)">
+                                <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                <button type="submit" class="btn btn-outline-dark">Отменить</button>
+                            </form>
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Mafia && p.Role != GameRole.Don))
+                            {
+                                <form asp-action="MafiaVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-dark">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Mafia && p.Role != GameRole.Don))
+                            {
+                                <form asp-action="MafiaVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-dark">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (Model.Lobby.Stage == GameStage.KillerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Killer)
+        {
+            <div class="card mb-4">
+                <div class="card-header">Ход маньяка</div>
+                <div class="card-body">
+                    @if (yourManiacVote.HasValue)
+                    {
+                        <div class="mb-2">Вы проголосовали за: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourManiacVote)?.Name</strong></div>
+                        <div class="d-flex gap-2 flex-wrap mb-2">
+                            <form asp-action="CancelManiacVote" method="post" onsubmit="return handleForm(event)">
+                                <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                <button type="submit" class="btn btn-outline-secondary">Отменить</button>
+                            </form>
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Killer))
+                            {
+                                <form asp-action="ManiacVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Killer))
+                            {
+                                <form asp-action="ManiacVote" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (Model.Lobby.Stage == GameStage.CommissionerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Commissioner)
+        {
+            var hasAction = Model.Lobby.CommissionerVote.HasValue || Model.Lobby.PendingCommissionerCheckResult.HasValue;
+            <div class="card mb-4">
+                <div class="card-header">Ход комиссара</div>
+                <div class="card-body">
+                    @if (hasAction)
+                    {
+                        <div class="mb-2">Действие выбрано</div>
+                        <div class="d-flex gap-2 flex-wrap mb-2">
+                            <form asp-action="CancelCommissionerVote" method="post" onsubmit="return handleForm(event)">
+                                <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                <button type="submit" class="btn btn-outline-danger">Отменить</button>
+                            </form>
+                        </div>
+                        <p class="mb-2">Убить игрока:</p>
+                        <div class="d-flex gap-2 flex-wrap mb-3">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="CommissionerKill" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-danger">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                        <p class="mb-2">Проверить игрока:</p>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="CommissionerCheck" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-info">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="mb-2">Убить игрока:</p>
+                        <div class="d-flex gap-2 flex-wrap mb-3">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="CommissionerKill" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-danger">Убить @target.Name</button>
+                                </form>
+                            }
+                        </div>
+                        <p class="mb-2">Проверить игрока:</p>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="CommissionerCheck" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-info">Проверить @target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (Model.Lobby.Stage == GameStage.BeautyTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Beauty)
+        {
+            <div class="card mb-4">
+                <div class="card-header">Ход красотки</div>
+                <div class="card-body">
+                    @if (yourBeautyVote.HasValue)
+                    {
+                        <div class="mb-2">Выбрано: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourBeautyVote)?.Name</strong></div>
+                        <div class="d-flex gap-2 flex-wrap mb-2">
+                            <form asp-action="CancelBeautyVote" method="post" onsubmit="return handleForm(event)">
+                                <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                <button type="submit" class="btn btn-outline-warning">Отменить</button>
+                            </form>
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="BeautyAction" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-warning">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="mb-2">Выберите игрока (нельзя выбирать одного игрока 2 ночи подряд):</p>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="BeautyAction" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-warning">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (Model.Lobby.Stage == GameStage.DoctorTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Doctor)
+        {
+            <div class="card mb-4">
+                <div class="card-header">Ход доктора</div>
+                <div class="card-body">
+                    @if (yourDoctorVote.HasValue)
+                    {
+                        <div class="mb-2">Выбрано: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourDoctorVote)?.Name</strong></div>
+                        <div class="d-flex gap-2 flex-wrap mb-2">
+                            <form asp-action="CancelDoctorVote" method="post" onsubmit="return handleForm(event)">
+                                <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                <button type="submit" class="btn btn-outline-success">Отменить</button>
+                            </form>
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="DoctorAction" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-success">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="mb-2">Выберите игрока для спасения (нельзя выбирать одного игрока 2 ночи подряд):</p>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="DoctorAction" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-success">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (Model.Lobby.Stage == GameStage.NecromancerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Necromancer)
+        {
+            <div class="card mb-4">
+                <div class="card-header">Ход некроманта</div>
+                <div class="card-body">
+                    @if (yourNecromancerVote.HasValue)
+                    {
+                        <div class="mb-2">Выбрано: <strong>@Model.Lobby.Players.FirstOrDefault(p => p.Id == yourNecromancerVote)?.Name</strong></div>
+                        <div class="d-flex gap-2 flex-wrap mb-2">
+                            <form asp-action="CancelNecromancerVote" method="post" onsubmit="return handleForm(event)">
+                                <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                <button type="submit" class="btn btn-outline-secondary">Отменить</button>
+                            </form>
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="NecromancerAction" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="mb-2">Выберите игрока, чтобы превратить его в зомби:</p>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @foreach (var target in Model.Lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Id != Model.CurrentPlayer.Id))
+                            {
+                                <form asp-action="NecromancerAction" method="post" onsubmit="return handleForm(event)">
+                                    <input type="hidden" name="code" value="@Model.Lobby.Code"/>
+                                    <input type="hidden" name="playerId" value="@Model.CurrentPlayer.Id"/>
+                                    <input type="hidden" name="targetId" value="@target.Id"/>
+                                    <button type="submit" class="btn btn-secondary">@target.Name</button>
+                                </form>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<script>
+    window.handleForm = async function(e) {
+        e.preventDefault();
+        const form = e.target;
+        const formData = new FormData(form);
+        
+        try {
+            const response = await fetch(form.action, {
+                method: "POST",
+                body: formData
+            });
+            if (response.ok) {
+                location.reload();
+            } else {
+                const data = await response.json();
+                if (data.error) {
+                    alert(data.error);
+                }
+            }
+        } catch (err) {
+            console.error(err);
+        }
+        return false;
+    };
+</script>
