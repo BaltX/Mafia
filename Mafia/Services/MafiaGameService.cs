@@ -111,7 +111,7 @@ public class MafiaGameService
 
             if (lobby!.Stage != GameStage.Lobby)
             {
-                error = "Ботов можно добавлять только в лобби.";
+                error = GameConstants.Errors.BotsOnlyInLobby;
                 return null;
             }
 
@@ -443,14 +443,14 @@ public class MafiaGameService
         lobby = null;
         if (!_lobbies.TryGetValue(code.Trim(), out lobby))
         {
-            error = "Лобби не найдено.";
+            error = GameConstants.Errors.LobbyNotFound;
             return false;
         }
 
         var host = lobby.Players.FirstOrDefault(p => p.Id == hostId);
         if (host is null || host.Role != GameRole.Host)
         {
-            error = "Только ведущий может выполнить это действие.";
+            error = GameConstants.Errors.OnlyHostCanDoThis;
             return false;
         }
 
@@ -464,14 +464,14 @@ public class MafiaGameService
         lobby = null;
         if (!_lobbies.TryGetValue(code.Trim(), out lobby))
         {
-            error = "Лобби не найдено.";
+            error = GameConstants.Errors.LobbyNotFound;
             return false;
         }
 
         player = lobby.Players.FirstOrDefault(p => p.Id == playerId);
         if (player is null)
         {
-            error = "Игрок не найден в лобби.";
+            error = GameConstants.Errors.PlayerNotFoundInLobby;
             return false;
         }
 
@@ -504,20 +504,5 @@ public class MafiaGameService
         }
     }
 
-    private static string StageText(GameStage stage) => stage switch
-    {
-        GameStage.Lobby => "Ожидание",
-        GameStage.Discussion => "Обсуждение",
-        GameStage.DayVoting => "Дневное голосование",
-        GameStage.NightStart => "Начало ночи",
-        GameStage.BeautyTurn => "Ход красотки",
-        GameStage.DoctorTurn => "Ход доктора",
-        GameStage.CommissionerTurn => "Ход комиссара",
-        GameStage.MafiaTurn => "Ход мафии",
-        GameStage.KillerTurn => "Ход маньяка",
-        GameStage.NecromancerTurn => "Ход некроманта",
-        GameStage.NightResult => "Результат ночи",
-        GameStage.GameOver => "Завершена",
-        _ => stage.ToString()
-    };
+    private static string StageText(GameStage stage) => stage.GetDisplayText();
 }

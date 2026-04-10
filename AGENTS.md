@@ -15,9 +15,19 @@ Mafia/
 ├── Services/
 │   ├── MafiaGameService.cs      # Главный сервис — координация игры
 │   ├── MafiaGameLogicService.cs # Логика старта игры, распределение ролей
-│   ├── MafiaVotingService.cs    # Все голосования
+│   ├── MafiaVotingService.cs    # Все голосования (backward compatibility)
 │   ├── MafiaNightService.cs     # Управление стадиями ночи
-│   └── MafiaWinConditionService.cs # Определение победителя
+│   ├── MafiaWinConditionService.cs # Определение победителя
+│   └── Handlers/
+│       ├── IVotingHandler.cs           # Интерфейс для голосований
+│       ├── VotingHandlerFactory.cs      # Фабрика обработчиков
+│       ├── DayVotingHandler.cs       # Дневное голосование
+│       ├── MafiaVotingHandler.cs    # Голосование мафии
+│       ├── KillerVotingHandler.cs  # Голосование маньяка
+│       ├── BeautyVotingHandler.cs # Действие красотки
+│       ├── DoctorVotingHandler.cs # Действие доктора
+│       ├── CommissionerVotingHandler.cs # Действия комиссара (check/kill)
+│       └── NecromancerVotingHandler.cs # Действие некроманта
 ├── Controllers/
 │   └── GameController.cs
 └── Views/
@@ -65,6 +75,14 @@ Lobby → Discussion → DayVoting → DiscussionBeforeSecondVote → DayVoting2
 - Валидация голосов
 - Подсчёт результатов через `ResolveVote`, `ResolveMafiaVote`
 - Бот-голосования через `ProcessBotVotes`
+- Для нового кода используйте Handlers (см. ниже)
+
+### Handlers (новые голосования)
+Каждый тип голосования вынесен в отдельный класс:
+
+- `IVotingHandler` — интерфейс с методами: `CanVote`, `GetNotValidError`, `SetVote`, `ClearVote`
+- `VotingFactory.GetHandler(stage, role)` — получить нужный handler
+- `CommissionerVotingHandler` — имеет дополнительные методы: `CommissionerCheck`, `CommissionerKill`, `SetCommissionerIsKill`
 
 ### MafiaNightService
 - Переход между стадиями через `NextStage`
@@ -93,10 +111,11 @@ Lobby → Discussion → DayVoting → DiscussionBeforeSecondVote → DayVoting2
 ## Как добавить новую роль
 
 1. Добавить в `GameRole` enum
-2. Добавить голосование в `MafiaVotingService`
+2. Добавить голосование в `MafiaVotingService` или создать новый `Handler` класс
 3. Добавить стадию в `GameStage` если нужен отдельный ход
 4. Обновить `MafiaNightService.GetRolesForStage()`
 5. Обновить `MafiaWinConditionService`
+6. Добавить handler в `VotingHandlerFactory`
 
 ## Тестирование
 

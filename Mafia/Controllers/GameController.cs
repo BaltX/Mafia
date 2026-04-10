@@ -102,7 +102,7 @@ public class GameController(MafiaGameService gameService) : Controller
         var votingTargets = GetVotingTargets(lobby, player);
         var currentPlayerVote = GetCurrentPlayerVote(lobby, player);
         var isHostView = player.IsHost();
-        var isNecromancer = player.Role == GameRole.Necromancer;
+        var isNecromancer = player.IsNecromancer();
 
         var isNightStage = IsNightStage(lobby.Stage);
         var isParticipatingInNight = isNightStage && IsPlayerParticipatingInNightStage(lobby.Stage, player);
@@ -140,11 +140,11 @@ public class GameController(MafiaGameService gameService) : Controller
             }).ToList(),
             votingTargets = votingTargets,
             currentVote = currentPlayerVote,
-            commissionerKillTargets = player.Role == GameRole.Commissioner ? GetCommissionerKillTargets(lobby, player) : [],
-            commissionerChecks = (player.Role == GameRole.Commissioner || isHostView) ? GetCommissionerChecks(lobby) : null,
-            hasCommissionerCheckPending = player.Role == GameRole.Commissioner && lobby.PendingCommissionerCheckResult.HasValue,
-            commissionerIsKill = player.Role == GameRole.Commissioner && lobby.CommissionerIsKill,
-            commissionerTargets = player.Role == GameRole.Commissioner && !lobby.PendingCommissionerCheckResult.HasValue 
+            commissionerKillTargets = player.IsCommissioner() ? GetCommissionerKillTargets(lobby, player) : [],
+            commissionerChecks = (player.IsCommissioner() || isHostView) ? GetCommissionerChecks(lobby) : null,
+            hasCommissionerCheckPending = player.IsCommissioner() && lobby.PendingCommissionerCheckResult.HasValue,
+            commissionerIsKill = player.IsCommissioner() && lobby.CommissionerIsKill,
+            commissionerTargets = player.IsCommissioner() && !lobby.PendingCommissionerCheckResult.HasValue 
                 ? GetCommissionerKillTargets(lobby, player) 
                 : null,
             dayVotes = isHostView ? lobby.DayVotes : null,
@@ -202,15 +202,15 @@ public class GameController(MafiaGameService gameService) : Controller
                 alivePlayers.Where(p => lobby.Day1TopVotedPlayerIds.Contains(p.Id)).Select(p => p.Id).ToList(),
             GameStage.MafiaTurn when player.Role is GameRole.Mafia or GameRole.Don =>
                 alivePlayers.Where(p => p.Role != GameRole.Mafia && p.Role != GameRole.Don).Select(p => p.Id).ToList(),
-            GameStage.KillerTurn when player.Role == GameRole.Killer =>
+            GameStage.KillerTurn when player.IsKiller() =>
                 alivePlayers.Select(p => p.Id).ToList(),
-            GameStage.CommissionerTurn when player.Role == GameRole.Commissioner =>
+            GameStage.CommissionerTurn when player.IsCommissioner() =>
                 alivePlayers.Where(p => p.Role != GameRole.Commissioner).Select(p => p.Id).ToList(),
-            GameStage.BeautyTurn when player.Role == GameRole.Beauty =>
+            GameStage.BeautyTurn when player.IsBeauty() =>
                 alivePlayers.Select(p => p.Id).ToList(),
-            GameStage.DoctorTurn when player.Role == GameRole.Doctor =>
+            GameStage.DoctorTurn when player.IsDoctor() =>
                 alivePlayers.Select(p => p.Id).ToList(),
-            GameStage.NecromancerTurn when player.Role == GameRole.Necromancer =>
+            GameStage.NecromancerTurn when player.IsNecromancer() =>
                 lobby.Players.Where(p => !p.IsHost() && p.Id != player.Id).Select(p => p.Id).ToList(),
             _ => []
         };
@@ -240,12 +240,12 @@ public class GameController(MafiaGameService gameService) : Controller
         
         return stage switch
         {
-            GameStage.BeautyTurn => player.Role == GameRole.Beauty,
-            GameStage.DoctorTurn => player.Role == GameRole.Doctor,
-            GameStage.CommissionerTurn => player.Role == GameRole.Commissioner,
+            GameStage.BeautyTurn => player.IsBeauty(),
+            GameStage.DoctorTurn => player.IsDoctor(),
+            GameStage.CommissionerTurn => player.IsCommissioner(),
             GameStage.MafiaTurn => player.Role is GameRole.Mafia or GameRole.Don,
-            GameStage.KillerTurn => player.Role == GameRole.Killer,
-            GameStage.NecromancerTurn => player.Role == GameRole.Necromancer,
+            GameStage.KillerTurn => player.IsKiller(),
+            GameStage.NecromancerTurn => player.IsNecromancer(),
             _ => false
         };
     }
@@ -260,12 +260,12 @@ public class GameController(MafiaGameService gameService) : Controller
             GameStage.DayVoting or GameStage.DayVoting2 => lobby.DayVotes.TryGetValue(player.Id, out var dv) ? dv : null,
             GameStage.MafiaTurn when player.Role is GameRole.Mafia or GameRole.Don =>
                 lobby.MafiaVotes.TryGetValue(player.Id, out var mv) ? mv : null,
-            GameStage.KillerTurn when player.Role == GameRole.Killer => lobby.KillerVote,
-            GameStage.CommissionerTurn when player.Role == GameRole.Commissioner => 
+            GameStage.KillerTurn when player.IsKiller() => lobby.KillerVote,
+            GameStage.CommissionerTurn when player.IsCommissioner() => 
                 lobby.CommissionerVote ?? lobby.CommissionerChecks.Keys.LastOrDefault(),
-            GameStage.BeautyTurn when player.Role == GameRole.Beauty => lobby.BeautyVote,
-            GameStage.DoctorTurn when player.Role == GameRole.Doctor => lobby.DoctorVote,
-            GameStage.NecromancerTurn when player.Role == GameRole.Necromancer => lobby.NecromancerVote,
+            GameStage.BeautyTurn when player.IsBeauty() => lobby.BeautyVote,
+            GameStage.DoctorTurn when player.IsDoctor() => lobby.DoctorVote,
+            GameStage.NecromancerTurn when player.IsNecromancer() => lobby.NecromancerVote,
             _ => null
         };
     }
