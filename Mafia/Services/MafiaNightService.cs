@@ -7,8 +7,6 @@ namespace Mafia.Services;
 /// </summary>
 public class MafiaNightService
 {
-    private readonly MafiaVotingService _votingService = new();
-
     /// <summary>
     /// Переход к следующей стадии игры.
     /// </summary>
@@ -140,7 +138,7 @@ public class MafiaNightService
         
         lobby.StageEndsAtUtc = DateTimeOffset.UtcNow.AddSeconds(lobby.Stage.GetSeconds(lobby));
         lobby.Stage = nextStage.Value;
-        _votingService.ProcessBotVotes(lobby, nextStage.Value);
+        MafiaVotingService.ProcessBotVotes(lobby, nextStage.Value);
     }
 
     private static void HandleDayResult(LobbyState lobby)

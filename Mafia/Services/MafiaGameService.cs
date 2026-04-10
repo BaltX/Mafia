@@ -2,507 +2,99 @@ using Mafia.Models;
 
 namespace Mafia.Services;
 
-/// <summary>
-/// Main service for managing Mafia game operations.
-/// Coordinates between specialized services for game logic, voting, and night stages.
-/// </summary>
 public class MafiaGameService
 {
-    private readonly object _sync = new();
-    private readonly Dictionary<string, LobbyState> _lobbies = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LobbyService _lobbyService = new();
     private readonly MafiaGameLogicService _gameLogicService = new();
-    private readonly MafiaVotingService _votingService = new();
     private readonly MafiaNightService _nightService = new();
-    private static readonly Random SharedRandom = Random.Shared;
+    private readonly VotingCoordinator _votingCoordinator;
 
-    /// <summary>Creates a new game lobby with the host player.</summary>
-    public (LobbyState Lobby, PlayerState Host)? CreateLobby(string hostName)
+    public MafiaGameService()
     {
-        if (string.IsNullOrWhiteSpace(hostName))
-        {
-            return null;
-        }
-
-        var trimmedName = hostName.Trim();
-        if (trimmedName.Length > 20 || trimmedName.Any(c => !char.IsLetterOrDigit(c) && c != ' '))
-        {
-            return null;
-        }
-
-        lock (_sync)
-        {
-            var code = GenerateCode();
-            var host = new PlayerState
-            {
-                Name = trimmedName,
-                Role = GameRole.Host,
-                IsAlive = true
-            };
-
-            var lobby = new LobbyState
-            {
-                Code = code
-            };
-            lobby.Players.Add(host);
-            _lobbies[code] = lobby;
-            return (lobby, host);
-        }
+        _votingCoordinator = new VotingCoordinator(_lobbyService, _nightService);
     }
 
-    /// <summary>Returns list of available lobbies.</summary>
-    public List<LobbyListItemViewModel> GetLobbies()
-    {
-        lock (_sync)
-        {
-            return _lobbies.Values
-                .OrderBy(x => x.Code)
-                .Select(lobby => new LobbyListItemViewModel
-                {
-                    Code = lobby.Code,
-                    StageText = StageText(lobby.Stage),
-                    TotalPlayers = lobby.Players.Count
-                })
-                .ToList();
-        }
-    }
+    public (LobbyState Lobby, PlayerState Host)? CreateLobby(string hostName) =>
+        _lobbyService.CreateLobby(hostName);
 
-    /// <summary>Joins an existing lobby.</summary>
-    public (LobbyState Lobby, PlayerState Player)? JoinLobby(string code, string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return null;
-        }
+    public List<LobbyListItemViewModel> GetLobbies() =>
+        _lobbyService.GetLobbies();
 
-        var trimmedName = name.Trim();
-        if (trimmedName.Length > 20 || trimmedName.Any(c => !char.IsLetterOrDigit(c) && c != ' '))
-        {
-            return null;
-        }
+    public (LobbyState Lobby, PlayerState Player)? JoinLobby(string code, string name) =>
+        _lobbyService.JoinLobby(code, name);
 
-        lock (_sync)
-        {
-            if (!_lobbies.TryGetValue(code.Trim(), out var lobby) || lobby.Stage != GameStage.Lobby)
-            {
-                return null;
-            }
+    public (LobbyState Lobby, PlayerState Player)? AddBot(string code, Guid hostId, out string? error) =>
+        _lobbyService.AddBot(code, hostId, out error);
 
-            var player = new PlayerState
-            {
-                Name = trimmedName,
-                Role = GameRole.Unassigned,
-                IsAlive = true
-            };
-            lobby.Players.Add(player);
-            return (lobby, player);
-        }
-    }
+    public (LobbyState Lobby, PlayerState Player)? GetState(string code, Guid playerId) =>
+        _votingCoordinator.GetState(code, playerId);
 
-    /// <summary>Adds a bot player to the lobby.</summary>
-    public (LobbyState Lobby, PlayerState Player)? AddBot(string code, Guid hostId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetHostLobby(code, hostId, out var lobby, out error))
-            {
-                return null;
-            }
-
-            if (lobby!.Stage != GameStage.Lobby)
-            {
-                error = GameConstants.Errors.BotsOnlyInLobby;
-                return null;
-            }
-
-            var botNumber = lobby.Players.Count(p => p.IsBot) + 1;
-            var bot = new PlayerState
-            {
-                Name = $"Бот {botNumber}",
-                Role = GameRole.Unassigned,
-                IsAlive = true,
-                IsBot = true
-            };
-            lobby.Players.Add(bot);
-            return (lobby, bot);
-        }
-    }
-
-    /// <summary>Gets the current state of a lobby for a specific player.</summary>
-    public (LobbyState Lobby, PlayerState Player)? GetState(string code, Guid playerId)
-    {
-        lock (_sync)
-        {
-            CleanupOldLobbies();
-
-            if (!_lobbies.TryGetValue(code.Trim(), out var lobby))
-            {
-                return null;
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            while (lobby.StageEndsAtUtc.HasValue && now >= lobby.StageEndsAtUtc.Value && lobby.Stage != GameStage.Lobby && lobby.Stage != GameStage.GameOver)
-            {
-                _votingService.ProcessBotVotes(lobby, lobby.Stage);
-                _nightService.NextStage(lobby, out _);
-            }
-
-            var player = lobby.Players.FirstOrDefault(p => p.Id == playerId);
-            return player is null ? null : (lobby, player);
-        }
-    }
-
-    /// <summary>Starts the game and assigns roles.</summary>
     public bool StartGame(string code, Guid hostId, out string? error)
     {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetHostLobby(code, hostId, out var lobby, out error))
-            {
-                return false;
-            }
+        error = null;
+        if (!_lobbyService.TryGetHostLobby(code, hostId, out var lobby, out error))
+            return false;
 
-            return _gameLogicService.StartGame(lobby!, out error);
-        }
+        return _gameLogicService.StartGame(lobby!, out error);
     }
 
-    /// <summary>Cast a day vote.</summary>
-    public bool DayVote(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool DayVote(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.DayVote(code, playerId, targetId, out error);
 
-            return _votingService.DayVote(lobby!, player!, targetId, out error);
-        }
-    }
+    public bool CancelDayVote(string code, Guid playerId, out string? error) =>
+        _votingCoordinator.CancelDayVote(code, playerId, out error);
 
-    /// <summary>Cancel day vote.</summary>
-    public bool CancelDayVote(string code, Guid playerId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool MafiaVote(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.MafiaVote(code, playerId, targetId, out error);
 
-            return _votingService.CancelDayVote(lobby!, player!, out error);
-        }
-    }
+    public bool CancelMafiaVote(string code, Guid playerId, out string? error) =>
+        _votingCoordinator.CancelMafiaVote(code, playerId, out error);
 
-    /// <summary>Cast mafia vote.</summary>
-    public bool MafiaVote(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool ManiacVote(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.ManiacVote(code, playerId, targetId, out error);
 
-            return _votingService.MafiaVote(lobby!, player!, targetId, out error);
-        }
-    }
+    public bool CancelManiacVote(string code, Guid playerId, out string? error) =>
+        _votingCoordinator.CancelManiacVote(code, playerId, out error);
 
-    /// <summary>Cancel mafia vote.</summary>
-    public bool CancelMafiaVote(string code, Guid playerId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool CommissionerCheck(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.CommissionerCheck(code, playerId, targetId, out error);
 
-            return _votingService.CancelMafiaVote(lobby!, player!, out error);
-        }
-    }
+    public bool CommissionerKill(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.CommissionerKill(code, playerId, targetId, out error);
 
-    /// <summary>Cast maniac (killer) vote.</summary>
-    public bool ManiacVote(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool SetCommissionerIsKill(string code, Guid playerId, bool isKill, out string? error) =>
+        _votingCoordinator.SetCommissionerIsKill(code, playerId, isKill, out error);
 
-            return _votingService.ManiacVote(lobby!, player!, targetId, out error);
-        }
-    }
+    public bool CommissionerVote(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.CommissionerVote(code, playerId, targetId, out error);
 
-    /// <summary>Cancel maniac vote.</summary>
-    public bool CancelManiacVote(string code, Guid playerId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool CancelCommissionerVote(string code, Guid playerId, out string? error) =>
+        _votingCoordinator.CancelCommissionerVote(code, playerId, out error);
 
-            return _votingService.CancelManiacVote(lobby!, player!, out error);
-        }
-    }
+    public bool BeautyAction(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.BeautyAction(code, playerId, targetId, out error);
 
-    /// <summary>Commissioner check action.</summary>
-    public bool CommissionerCheck(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool CancelBeautyVote(string code, Guid playerId, out string? error) =>
+        _votingCoordinator.CancelBeautyVote(code, playerId, out error);
 
-            return _votingService.CommissionerAction(lobby!, player!, targetId, false, out error);
-        }
-    }
+    public bool DoctorAction(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.DoctorAction(code, playerId, targetId, out error);
 
-    /// <summary>Commissioner kill action.</summary>
-    public bool CommissionerKill(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool CancelDoctorVote(string code, Guid playerId, out string? error) =>
+        _votingCoordinator.CancelDoctorVote(code, playerId, out error);
 
-            return _votingService.CommissionerAction(lobby!, player!, targetId, true, out error);
-        }
-    }
+    public bool NecromancerAction(string code, Guid playerId, Guid targetId, out string? error) =>
+        _votingCoordinator.NecromancerAction(code, playerId, targetId, out error);
 
-    /// <summary>Set commissioner mode (check or kill).</summary>
-    public bool SetCommissionerIsKill(string code, Guid playerId, bool isKill, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
+    public bool CancelNecromancerVote(string code, Guid playerId, out string? error) =>
+        _votingCoordinator.CancelNecromancerVote(code, playerId, out error);
 
-            return _votingService.SetCommissionerIsKill(lobby!, player!, isKill, out error);
-        }
-    }
-
-    /// <summary>Commissioner vote.</summary>
-    public bool CommissionerVote(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.CommissionerVote(lobby!, player!, targetId, out error);
-        }
-    }
-
-    /// <summary>Cancel commissioner vote.</summary>
-    public bool CancelCommissionerVote(string code, Guid playerId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.CancelCommissionerVote(lobby!, player!, out error);
-        }
-    }
-
-    /// <summary>Beauty action.</summary>
-    public bool BeautyAction(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.BeautyAction(lobby!, player!, targetId, out error);
-        }
-    }
-
-    /// <summary>Cancel beauty vote.</summary>
-    public bool CancelBeautyVote(string code, Guid playerId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.CancelBeautyVote(lobby!, player!, out error);
-        }
-    }
-
-    /// <summary>Doctor action.</summary>
-    public bool DoctorAction(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.DoctorAction(lobby!, player!, targetId, out error);
-        }
-    }
-
-    /// <summary>Cancel doctor vote.</summary>
-    public bool CancelDoctorVote(string code, Guid playerId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.CancelDoctorVote(lobby!, player!, out error);
-        }
-    }
-
-    /// <summary>Necromancer action.</summary>
-    public bool NecromancerAction(string code, Guid playerId, Guid targetId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.NecromancerAction(lobby!, player!, targetId, out error);
-        }
-    }
-
-    /// <summary>Cancel necromancer vote.</summary>
-    public bool CancelNecromancerVote(string code, Guid playerId, out string? error)
-    {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetPlayerLobby(code, playerId, out var lobby, out var player, out error))
-            {
-                return false;
-            }
-
-            return _votingService.CancelNecromancerVote(lobby!, player!, out error);
-        }
-    }
-
-    /// <summary>Advance to the next game stage.</summary>
     public bool NextStage(string code, Guid hostId, out string? error)
     {
-        lock (_sync)
-        {
-            error = null;
-            if (!TryGetHostLobby(code, hostId, out var lobby, out error))
-            {
-                return false;
-            }
-
-            return _nightService.NextStage(lobby!, out error);
-        }
-    }
-
-    private bool TryGetHostLobby(string code, Guid hostId, out LobbyState? lobby, out string? error)
-    {
         error = null;
-        lobby = null;
-        if (!_lobbies.TryGetValue(code.Trim(), out lobby))
-        {
-            error = GameConstants.Errors.LobbyNotFound;
+        if (!_lobbyService.TryGetHostLobby(code, hostId, out var lobby, out error))
             return false;
-        }
 
-        var host = lobby.Players.FirstOrDefault(p => p.Id == hostId);
-        if (host is null || host.Role != GameRole.Host)
-        {
-            error = GameConstants.Errors.OnlyHostCanDoThis;
-            return false;
-        }
-
-        return true;
+        return _nightService.NextStage(lobby!, out error);
     }
-
-    private bool TryGetPlayerLobby(string code, Guid playerId, out LobbyState? lobby, out PlayerState? player, out string? error)
-    {
-        error = null;
-        player = null;
-        lobby = null;
-        if (!_lobbies.TryGetValue(code.Trim(), out lobby))
-        {
-            error = GameConstants.Errors.LobbyNotFound;
-            return false;
-        }
-
-        player = lobby.Players.FirstOrDefault(p => p.Id == playerId);
-        if (player is null)
-        {
-            error = GameConstants.Errors.PlayerNotFoundInLobby;
-            return false;
-        }
-
-        return true;
-    }
-
-    private string GenerateCode()
-    {
-        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-        while (true)
-        {
-            var code = new string(Enumerable.Range(0, 6).Select(_ => alphabet[SharedRandom.Next(alphabet.Length)]).ToArray());
-            if (!_lobbies.ContainsKey(code))
-            {
-                return code;
-            }
-        }
-    }
-
-    private void CleanupOldLobbies()
-    {
-        var threshold = DateTimeOffset.UtcNow.AddHours(-1);
-        var toRemove = _lobbies
-            .Where(kvp => kvp.Value.Stage == GameStage.GameOver && kvp.Value.StageEndsAtUtc < threshold)
-            .Select(kvp => kvp.Key)
-            .ToList();
-        foreach (var code in toRemove)
-        {
-            _lobbies.Remove(code);
-        }
-    }
-
-    private static string StageText(GameStage stage) => stage.GetDisplayText();
 }
