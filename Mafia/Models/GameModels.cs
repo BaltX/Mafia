@@ -90,7 +90,7 @@ public class LobbyState
     public List<string> LastNightResultTexts { get; init; } = [];
     public Guid? LastDayVictimId { get; set; }
     public Dictionary<Guid, bool> CommissionerChecks { get; init; } = [];
-    public bool? PendingCommissionerCheckResult { get; set; }
+    public int LastCommissionerCheckRound { get; set; }
     public string? WinnerText { get; set; }
     public List<StageResultEntry> StageHistory { get; init; } = [];
 }

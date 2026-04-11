@@ -132,7 +132,7 @@ public class GameController(MafiaGameService gameService) : Controller
             {
                 id = p.Id,
                 name = p.Name,
-                role = isHostView || p.Id == player.Id ? p.Role.ToString() : "???",
+                role = p.Role.ToString(),
                 isAlive = p.IsAlive,
                 isZombie = p.IsZombie && (isHostView || isNecromancer),
                 isBot = p.IsBot,
@@ -142,9 +142,9 @@ public class GameController(MafiaGameService gameService) : Controller
             currentVote = currentPlayerVote,
             commissionerKillTargets = player.IsCommissioner() ? GetCommissionerKillTargets(lobby, player) : [],
             commissionerChecks = (player.IsCommissioner() || isHostView) ? GetCommissionerChecks(lobby) : null,
-            hasCommissionerCheckPending = player.IsCommissioner() && lobby.PendingCommissionerCheckResult.HasValue,
+            hasCommissionerCheckPending = player.IsCommissioner() && lobby.LastCommissionerCheckRound == lobby.Round,
             commissionerIsKill = player.IsCommissioner() && lobby.CommissionerIsKill,
-            commissionerTargets = player.IsCommissioner() && !lobby.PendingCommissionerCheckResult.HasValue 
+            commissionerTargets = player.IsCommissioner() && lobby.LastCommissionerCheckRound != lobby.Round 
                 ? GetCommissionerKillTargets(lobby, player) 
                 : null,
             dayVotes = isHostView ? lobby.DayVotes : null,
@@ -274,6 +274,28 @@ public class GameController(MafiaGameService gameService) : Controller
     public IActionResult StartGame(string code, Guid playerId)
     {
         if (!gameService.StartGame(code, playerId, out var error))
+        {
+            return BadRequest(new { error });
+        }
+
+        return Ok();
+    }
+
+    [HttpPost]
+    public IActionResult SetPlayerRole(string code, Guid hostId, Guid playerId, GameRole role)
+    {
+        if (!gameService.SetPlayerRole(code, hostId, playerId, role, out var error))
+        {
+            return BadRequest(new { error });
+        }
+
+        return Ok();
+    }
+
+    [HttpPost]
+    public IActionResult ClearPlayerRole(string code, Guid hostId, Guid playerId)
+    {
+        if (!gameService.ClearPlayerRole(code, hostId, playerId, out var error))
         {
             return BadRequest(new { error });
         }

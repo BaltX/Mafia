@@ -38,6 +38,77 @@ public class MafiaGameService
         return _gameLogicService.StartGame(lobby!, out error);
     }
 
+    public bool SetPlayerRole(string code, Guid hostId, Guid playerId, GameRole role, out string? error)
+    {
+        error = null;
+        if (!_lobbyService.TryGetHostLobby(code, hostId, out var lobby, out error))
+            return false;
+
+        if (lobby!.Stage != GameStage.Lobby)
+        {
+            error = "Роли можно назначать только в лобби.";
+            return false;
+        }
+
+        var player = lobby.Players.FirstOrDefault(p => p.Id == playerId);
+        if (player is null)
+        {
+            error = "Игрок не найден.";
+            return false;
+        }
+
+        if (player.Role == GameRole.Host)
+        {
+            error = "Нельзя изменить роль ведущего.";
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(GameRole), role) || role == GameRole.Unassigned || role == GameRole.Host)
+        {
+            error = "Недопустимая роль.";
+            return false;
+        }
+
+        var existingWithRole = lobby.Players.FirstOrDefault(p => p.Role == role && p.Id != playerId);
+        if (existingWithRole is not null)
+        {
+            error = $"Роль {role} уже назначена игроку {existingWithRole.Name}.";
+            return false;
+        }
+
+        player.Role = role;
+        return true;
+    }
+
+    public bool ClearPlayerRole(string code, Guid hostId, Guid playerId, out string? error)
+    {
+        error = null;
+        if (!_lobbyService.TryGetHostLobby(code, hostId, out var lobby, out error))
+            return false;
+
+        if (lobby!.Stage != GameStage.Lobby)
+        {
+            error = "Роли можно очищать только в лобби.";
+            return false;
+        }
+
+        var player = lobby.Players.FirstOrDefault(p => p.Id == playerId);
+        if (player is null)
+        {
+            error = "Игрок не найден.";
+            return false;
+        }
+
+        if (player.Role == GameRole.Host)
+        {
+            error = "Нельзя очистить роль ведущего.";
+            return false;
+        }
+
+        player.Role = GameRole.Unassigned;
+        return true;
+    }
+
     public bool DayVote(string code, Guid playerId, Guid targetId, out string? error) =>
         _votingCoordinator.DayVote(code, playerId, targetId, out error);
 

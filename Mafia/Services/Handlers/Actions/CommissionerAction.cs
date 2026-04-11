@@ -25,13 +25,19 @@ public class CommissionerAction : ActionBase
     public override void Execute(LobbyState lobby, PlayerState player, Guid targetId)
     {
         if (lobby.CommissionerIsKill)
+        {
             lobby.CommissionerVote = targetId;
+        }
         else
-            lobby.PendingCommissionerCheckResult = null;
+        {
+            lobby.CommissionerVote = targetId;
+        }
     }
 
-    public override void Cancel(LobbyState lobby, PlayerState player) =>
+    public override void Cancel(LobbyState lobby, PlayerState player)
+    {
         lobby.CommissionerVote = null;
+    }
 
     public bool CommissionerCheck(LobbyState lobby, PlayerState player, Guid targetId, out string? error)
     {
@@ -49,7 +55,7 @@ public class CommissionerAction : ActionBase
             return false;
         }
 
-        lobby.PendingCommissionerCheckResult = target.IsMafia();
+        lobby.CommissionerVote = targetId;
         return true;
     }
 

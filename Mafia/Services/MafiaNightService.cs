@@ -160,7 +160,7 @@ public class MafiaNightService
 
     private void HandleNightResult(LobbyState lobby)
     {
-        lobby.PendingCommissionerCheckResult = null;
+        lobby.LastCommissionerCheckRound = 0;
         lobby.Round++;
         lobby.Stage = GameStage.Discussion;
         lobby.StageEndsAtUtc = DateTimeOffset.UtcNow.AddSeconds(lobby.DiscussionSeconds);

@@ -81,7 +81,7 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-function renderPlayersList(players, commissionerChecks) {
+function renderPlayersList(players, commissionerChecks, isHost, stage) {
     let html = `<div class="card mb-4"><div class="card-header">👥 Игроки</div><div class="card-body" style="color: #f1f5f9;">`;
     for (const p of players) {
         const roleEmoji = getRoleEmoji(p.role);
@@ -103,9 +103,50 @@ function renderPlayersList(players, commissionerChecks) {
         html += `<div class="player-item">`;
         html += `<span class="player-name">${escapeHtml(p.name)}</span> `;
         html += `<span class="badge ${getRoleBadgeClass(p.role)}">${roleEmoji} ${getRoleName(p.role)}</span>${statusEmoji ? ` <span class="status-emoji">${statusEmoji}</span>` : ""}${checkIcon ? ` <span class="status-emoji">${checkIcon}</span>` : ""}`;
+        
+        if (isHost && stage === "Lobby" && p.role !== "Host") {
+            html += renderRoleButtons(players, p.id, p.role);
+        }
+        
         html += `</div>`;
     }
     html += `</div></div>`;
+    return html;
+}
+
+function renderRoleButtons(players, playerId, currentRole) {
+    const roles = ["Civilian", "Mafia", "Don", "Killer", "Commissioner", "Beauty", "Doctor", "Necromancer"];
+    let assignedRoles = roles.filter(r => players.some(p => p.role === r && p.id !== playerId));
+    let availableRoles = roles.filter(r => !assignedRoles.includes(r));
+    
+    let html = `<div class="mt-2 d-flex flex-wrap gap-1 align-items-center">`;
+    
+    html += `<div class="dropdown">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">Роль</button>
+        <ul class="dropdown-menu dropdown-menu-dark">`;
+    
+    for (const role of availableRoles) {
+        html += `<li><form action="/Game/SetPlayerRole" method="post" onsubmit="return handleForm(event)" class="d-inline">
+            <input type="hidden" name="code" value="${window._mafiaCode}"/>
+            <input type="hidden" name="hostId" value="${window._mafiaHostId}"/>
+            <input type="hidden" name="playerId" value="${playerId}"/>
+            <input type="hidden" name="role" value="${role}"/>
+            <button type="submit" class="dropdown-item btn btn-sm">${getRoleEmoji(role)} ${getRoleName(role)}</button>
+        </form></li>`;
+    }
+    
+    html += `</ul></div>`;
+    
+    if (currentRole !== "Unassigned" && currentRole !== "Civilian") {
+        html += `<form action="/Game/ClearPlayerRole" method="post" onsubmit="return handleForm(event)" class="d-inline">
+            <input type="hidden" name="code" value="${window._mafiaCode}"/>
+            <input type="hidden" name="hostId" value="${window._mafiaHostId}"/>
+            <input type="hidden" name="playerId" value="${playerId}"/>
+            <button type="submit" class="btn btn-outline-danger btn-sm">Очистить</button>
+        </form>`;
+    }
+    
+    html += `</div>`;
     return html;
 }
 
@@ -346,7 +387,7 @@ function initGameApp() {
 
         if (!data.showNightOverlay) {
             html += `<div class="row g-4">`;
-            html += `<div class="col-lg-6">${renderPlayersList(data.players, data.commissionerChecks)}</div>`;
+            html += `<div class="col-lg-6">${renderPlayersList(data.players, data.commissionerChecks, data.isHost, data.stage)}</div>`;
 
             if (data.stageHistory && data.stageHistory.length > 0) {
                 html += `<div class="col-lg-6">${renderHistory(data.stageHistory)}</div>`;
@@ -412,7 +453,7 @@ function initGameApp() {
         const playersCol = container.querySelector(".col-lg-6");
         if (!playersCol) return;
         
-        playersCol.innerHTML = renderPlayersList(data.players, data.commissionerChecks);
+        playersCol.innerHTML = renderPlayersList(data.players, data.commissionerChecks, data.isHost, data.stage);
         
         const historyCol = container.querySelectorAll(".col-lg-6")[1];
         if (historyCol && data.stageHistory?.length > 0) {
@@ -464,6 +505,8 @@ function initGameApp() {
         return false;
     };
 
+    window._mafiaCode = code;
+    window._mafiaHostId = playerId;
     sessionStorage.setItem("mafiaLobbyCode", code);
     sessionStorage.setItem("mafiaPlayerId", playerId);
 

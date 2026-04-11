@@ -42,56 +42,67 @@ public class MafiaGameLogicService
     {
         foreach (var p in players)
         {
-            p.Role = GameRole.Civilian;
+            if (p.Role == GameRole.Unassigned)
+                p.Role = GameRole.Civilian;
             p.IsAlive = true;
         }
     }
 
     private void AssignMafiaRoles(List<PlayerState> players)
     {
-        var mafiaCount = Math.Max(1, players.Count / 3);
-        var shuffled = players.OrderBy(_ => SharedRandom.Next()).ToList();
+        var unassigned = players.Where(p => p.Role == GameRole.Civilian).ToList();
+        if (unassigned.Count == 0) return;
 
-        for (int i = 0; i < mafiaCount; i++)
+        var hasMafia = players.Any(p => p.Role == GameRole.Mafia || p.Role == GameRole.Don);
+        if (!hasMafia)
         {
-            shuffled[i].Role = i == 0 ? GameRole.Don : GameRole.Mafia;
+            var mafiaCount = Math.Max(1, players.Count / 3);
+            var shuffled = unassigned.OrderBy(_ => SharedRandom.Next()).ToList();
+
+            for (int i = 0; i < mafiaCount && i < shuffled.Count; i++)
+            {
+                shuffled[i].Role = i == 0 ? GameRole.Don : GameRole.Mafia;
+            }
+
+            unassigned = shuffled.Skip(mafiaCount).ToList();
         }
 
-        var maniacCandidate = shuffled.Skip(mafiaCount).FirstOrDefault();
-        if (maniacCandidate is not null)
+        if (unassigned.Count > 0 && !players.Any(p => p.Role == GameRole.Killer))
         {
+            var maniacCandidate = unassigned[SharedRandom.Next(unassigned.Count)];
             maniacCandidate.Role = GameRole.Killer;
         }
     }
 
     private void AssignSpecialRoles(List<PlayerState> players)
     {
-        var civilians = players.Where(p => p.Role == GameRole.Civilian).ToList();
+        var unassigned = players.Where(p => p.Role == GameRole.Civilian).ToList();
+        if (unassigned.Count == 0) return;
 
-        if (civilians.Count > 0)
+        if (!players.Any(p => p.Role == GameRole.Commissioner))
         {
-            var commissioner = civilians[SharedRandom.Next(civilians.Count)];
+            var commissioner = unassigned[SharedRandom.Next(unassigned.Count)];
             commissioner.Role = GameRole.Commissioner;
-            civilians.Remove(commissioner);
+            unassigned.Remove(commissioner);
         }
 
-        if (civilians.Count > 0)
+        if (unassigned.Count > 0 && !players.Any(p => p.Role == GameRole.Beauty))
         {
-            var beauty = civilians[SharedRandom.Next(civilians.Count)];
+            var beauty = unassigned[SharedRandom.Next(unassigned.Count)];
             beauty.Role = GameRole.Beauty;
-            civilians.Remove(beauty);
+            unassigned.Remove(beauty);
         }
 
-        if (civilians.Count > 0)
+        if (unassigned.Count > 0 && !players.Any(p => p.Role == GameRole.Doctor))
         {
-            var doctor = civilians[SharedRandom.Next(civilians.Count)];
+            var doctor = unassigned[SharedRandom.Next(unassigned.Count)];
             doctor.Role = GameRole.Doctor;
-            civilians.Remove(doctor);
+            unassigned.Remove(doctor);
         }
 
-        if (civilians.Count > 0)
+        if (unassigned.Count > 0 && !players.Any(p => p.Role == GameRole.Necromancer))
         {
-            var necromancer = civilians[SharedRandom.Next(civilians.Count)];
+            var necromancer = unassigned[SharedRandom.Next(unassigned.Count)];
             necromancer.Role = GameRole.Necromancer;
         }
     }

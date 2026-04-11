@@ -358,7 +358,7 @@
 
             @if (Model.Lobby.Stage == GameStage.CommissionerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Commissioner)
             {
-                var hasAction = Model.Lobby.CommissionerVote.HasValue || Model.Lobby.PendingCommissionerCheckResult.HasValue;
+                var hasAction = Model.Lobby.CommissionerVote.HasValue || Model.Lobby.LastCommissionerCheckRound == Model.Lobby.Round;
                 <div class="card mb-4">
                     <div class="card-header">Ход комиссара</div>
                     <div class="card-body">
@@ -758,7 +758,7 @@ else
 
         @if (Model.Lobby.Stage == GameStage.CommissionerTurn && Model.CurrentPlayer.IsAlive && Model.CurrentPlayer.Role == GameRole.Commissioner)
         {
-            var hasAction = Model.Lobby.CommissionerVote.HasValue || Model.Lobby.PendingCommissionerCheckResult.HasValue;
+            var hasAction = Model.Lobby.CommissionerVote.HasValue || Model.Lobby.LastCommissionerCheckRound == Model.Lobby.Round;
             <div class="card mb-4">
                 <div class="card-header">Ход комиссара</div>
                 <div class="card-body">

@@ -62,16 +62,21 @@ public static class BotActionService
 
     private static void ProcessBotCommissionerVotes(LobbyState lobby)
     {
-        if (!lobby.PendingCommissionerCheckResult.HasValue && lobby.CommissionerVote is null)
+        if (lobby.LastCommissionerCheckRound != lobby.Round && lobby.CommissionerVote is null)
         {
             var targets = lobby.Players.Where(p => p.IsAlive && p.Role != GameRole.Host && p.Role != GameRole.Commissioner).ToList();
             if (targets.Count > 0)
             {
                 var target = targets[SharedRandom.Next(targets.Count)];
                 if (SharedRandom.Next(2) == 0)
-                    lobby.PendingCommissionerCheckResult = target.Role != GameRole.Mafia && target.Role != GameRole.Don;
+                {
+                    lobby.CommissionerChecks[target.Id] = target.Role != GameRole.Mafia && target.Role != GameRole.Don;
+                    lobby.LastCommissionerCheckRound = lobby.Round;
+                }
                 else
+                {
                     lobby.CommissionerVote = target.Id;
+                }
             }
         }
     }
