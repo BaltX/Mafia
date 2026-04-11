@@ -164,11 +164,6 @@ public static class NightActionService
         });
     }
 
-    public static void ZombiePlayer(LobbyState lobby, Guid id)
-    {
-        MakeZombie(lobby, id);
-    }
-
     public static void MakeZombie(LobbyState lobby, Guid id)
     {
         var player = lobby.Players.FirstOrDefault(p => p.Id == id);
